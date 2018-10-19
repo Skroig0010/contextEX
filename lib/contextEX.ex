@@ -5,6 +5,8 @@ defmodule ContextEX do
   @partial_prefix "_partial_"
   @arg_name "arg"
 
+  @local_context_agent_name :local_context_agent
+
 
   defmacro __using__(_options) do
     quote do
@@ -64,6 +66,15 @@ defmodule ContextEX do
             pid -> pid
           end
 
+        # start local contextServer
+        unless (is_pid Process.whereis(unquote(@local_context_agent_name))) do
+          try do
+            Agent.start(fn -> %{} end, [name: unquote(@local_context_agent_name)])
+          rescue
+            e -> e
+          end
+        end
+
         # register self_pid in node_agent
         Agent.update(node_agent_pid, fn(state) ->
           [{group, self_pid, %{}} | state]
@@ -116,16 +127,21 @@ defmodule ContextEX do
     quote do
       self_pid = unquote(pid)
       node_agent_pid = Process.whereis String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node()))
-      res = Agent.get(node_agent_pid, fn(state) ->
+      res1 = Agent.get(node_agent_pid, fn(state) ->
         state |> Enum.find(fn(x) ->
           {_group, p, _layers} = x
           p == self_pid
         end)
       end)
-      case res do
-        nil -> nil
-        {_, _, layers} -> layers
-      end
+      local_context_agent_pid = Process.whereis unquote(@local_context_agent_name)
+      res2 = Agent.get(local_context_agent_pid, fn(state) -> state end)
+      Map.merge(
+        case res1 do
+          nil -> nil
+          {_, _, layers} -> layers
+        end,
+        res2)
+
     end
   end
 
@@ -206,6 +222,16 @@ defmodule ContextEX do
     end
   end
 
+  defmacro with_context(context, do: body_exp) do
+    quote do
+      pid = Process.whereis unquote(@local_context_agent_name)
+      local_context = Agent.get(pid, fn(context) -> context end)
+      Agent.update(pid, fn(local_context) -> Map.merge(unquote(context), local_context) end)
+      unquote(body_exp)
+      Agent.update(pid, fn(state) -> local_context end)
+    end
+  end
+
   defmacro is_active?(pid, layer) do
     quote do
       map = get_activelayers(unquote(pid))
@@ -243,7 +269,7 @@ defmodule ContextEX do
       [{func_name, [context: module], args},
        [do:
          {:__block__, [],[
-          {:=, [], [{:layer, [], module}, {:get_activelayers, [], module}]},
+          {:=, [], [{:layer, [], module}, {:get_activelayers, [], []}]},
           {partialfunc_name(func_name), [context: module],
             # pass activated layers for first arg
             List.insert_at(args, 0, {:layer, [], module})}
