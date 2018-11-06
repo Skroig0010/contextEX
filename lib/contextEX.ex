@@ -1,4 +1,5 @@
 defmodule ContextEX do
+  use Application
   @top_agent_name :ContextEXAgent
   @node_agent_prefix "_node_agent_"
 
@@ -34,6 +35,7 @@ defmodule ContextEX do
   This server contains list which is pid of nodeLevel contexteServers.
   """
   def start(_type, _args) do
+    IO.inspect :hello
     unless (is_pid :global.whereis_name(@top_agent_name)) do
       try do
         Agent.start(fn -> [] end, [name: {:global, @top_agent_name}])
