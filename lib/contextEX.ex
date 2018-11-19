@@ -33,7 +33,8 @@ defmodule ContextEX do
   Start global contextServer.
   This server contains list which is pid of nodeLevel contexteServers.
   """
-  def start(_type, _args) do
+  def start() do
+    IO.inspect :hello
     unless (is_pid :global.whereis_name(@top_agent_name)) do
       try do
         Agent.start(fn -> [] end, [name: {:global, @top_agent_name}])
