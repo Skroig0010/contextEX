@@ -52,7 +52,9 @@ defmodule ContextEX do
       with  self_pid = self(),
         top_agent_pid = :global.whereis_name(unquote(@top_agent_name)),
         node_agent_name = String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node())),
-        group = (if (unquote(group) == nil), do: nil, else: unquote(group))
+        # group = (if (unquote(group) == nil), do: nil, else: unquote(group))
+        # ↓じゃダメなのか
+        group = unquote(group)
       do
         node_agent_pid =
           case Process.whereis(node_agent_name) do
