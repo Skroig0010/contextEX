@@ -1,5 +1,4 @@
 defmodule ContextEX do
-  use Application
   @top_agent_name :ContextEXAgent
   @node_agent_prefix "_node_agent_"
 
