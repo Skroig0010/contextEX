@@ -34,7 +34,7 @@ defmodule ContextEX do
   Start global contextServer.
   This server contains list which is pid of nodeLevel contexteServers.
   """
-  def start(_type, _args) do
+  def start() do
     IO.inspect :hello
     unless (is_pid :global.whereis_name(@top_agent_name)) do
       try do
@@ -53,7 +53,9 @@ defmodule ContextEX do
       with  self_pid = self(),
         top_agent_pid = :global.whereis_name(unquote(@top_agent_name)),
         node_agent_name = String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node())),
-        group = (if (unquote(group) == nil), do: nil, else: unquote(group))
+        # group = (if (unquote(group) == nil), do: nil, else: unquote(group))
+        # ↓じゃダメなのか
+        group = unquote(group)
       do
         node_agent_pid =
           case Process.whereis(node_agent_name) do

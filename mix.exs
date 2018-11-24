@@ -21,8 +21,7 @@ defmodule ContextEX.Mixfile do
   # Type "mix help compile.app" for more information
   def application do
     [applications: [:logger],
-     registered: [ContextEXAgent],
-     mod: {ContextEX, []}]
+     registered: [ContextEXAgent]]
   end
 
   # Dependencies can be Hex packages:
