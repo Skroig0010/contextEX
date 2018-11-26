@@ -103,11 +103,11 @@ defmodule ContextEX do
           flag = Enum.any?(state, fn(x) -> x == node_agent_pid end)
             if flag, do: state, else: [node_agent_pid | state]
         end
-        IO.inspect i1
+        IO.inspect :i1
         IO.inspect func.([])
-        IO.inspect i2
+        IO.inspect :i2
         Agent.update(top_agent_pid, func)
-        IO.inspect i3
+        IO.inspect :i3
 
         # unregister when process is down
         spawn(fn ->
