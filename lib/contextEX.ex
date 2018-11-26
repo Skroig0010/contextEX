@@ -163,15 +163,20 @@ defmodule ContextEX do
           p == self_pid
         end)
       end)
-      Map.merge(
-        case res1 do
+      layers1 = case res1 do
           nil -> nil
           {_, _, layers} -> layers
-        end,
-        case res2 do
+      end
+      layers2 = case res2 do
           nil -> nil
           {_, _, layers} -> layers
-        end)
+      end
+
+      if(layers1 != nil && layers2 != nil) do
+        Map.merge(layers1,layers2)
+      else
+        nil
+      end
 
     end
   end
@@ -217,7 +222,7 @@ defmodule ContextEX do
   end
 
   @doc """
-  update active layers
+  update active local layers
   return :ok
   return nil when pid isn't registered
   """
@@ -309,11 +314,29 @@ defmodule ContextEX do
     end
   end
 
+
   defmacro deflf(func, do: body_exp) do
     quote do: deflf(unquote(func), %{}, do: unquote(body_exp))
   end
 
-  defmacro deflf({name, meta, args_exp}, map_exp \\ %{}, do: body_exp) do
+  defmacro deflf({name, meta, args_exp}, {:when, meta2, [map_exp, cond_exp]}, do: body_exp) do
+    new_definition =
+      with  pf_name = partialfunc_name(name),
+            new_args = List.insert_at(args_exp, 0, map_exp),
+      do: {:when, meta2, [{pf_name, meta, new_args}, cond_exp]}
+
+    quote bind_quoted: [name: name, arity: length(args_exp), body: Macro.escape(body_exp), definition: Macro.escape(new_definition)] do
+      # register layered function
+      unless @layered_function[name] == arity, do: @layered_function {name, arity}
+
+      # define partialFunc in Caller module
+      Kernel.defp(unquote(definition)) do
+        unquote(body)
+      end
+    end
+  end
+
+  defmacro deflf({name, meta, args_exp}, map_exp, do: body_exp) do
     new_definition =
       with  pf_name = partialfunc_name(name),
             new_args = List.insert_at(args_exp, 0, map_exp),
@@ -331,10 +354,31 @@ defmodule ContextEX do
   end
 
   defmacro deflfp(func, do: body_exp) do
-    quote do: deflf(unquote(func), %{}, do: unquote(body_exp))
+    quote do: deflfp(unquote(func), %{}, do: unquote(body_exp))
   end
 
-  defmacro deflfp({name, meta, args_exp}, map_exp \\ %{}, do: body_exp) do
+  #defmacro deflfp({:when, meta, [func, cond_exp]}, do: body_exp) do
+  #  quote do: deflfp(unquote(func), unquote({:when, meta, [%{}, cond_exp]}), do: unquote(body_exp))
+  #end
+
+  defmacro deflfp({name, meta, args_exp}, {:when, meta2, [map_exp, cond_exp]}, do: body_exp) do
+    new_definition =
+      with  pf_name = partialfunc_name(name),
+            new_args = List.insert_at(args_exp, 0, map_exp),
+      do: {:when, meta2, [{pf_name, meta, new_args}, cond_exp]}
+
+    quote bind_quoted: [name: name, arity: length(args_exp), body: Macro.escape(body_exp), definition: Macro.escape(new_definition)] do
+      # register layered function
+      unless @layered_private_function[name] == arity, do: @layered_private_function {name, arity}
+
+      # define partialFunc in Caller module
+      Kernel.defp(unquote(definition)) do
+        unquote(body)
+      end
+    end
+  end
+
+  defmacro deflfp({name, meta, args_exp}, map_exp, do: body_exp) do
     new_definition =
       with pf_name = partialfunc_name(name),
            new_args = List.insert_at(args_exp, 0, map_exp),

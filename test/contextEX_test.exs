@@ -10,6 +10,7 @@ defmodule ContextEXTest do
     @context1 %{:categoryA => :layer1}
 
     def start(groupName \\ nil) do
+      ContextEX.start()
       pid = spawn(fn ->
         init_context(groupName)
         routine()
@@ -21,16 +22,22 @@ defmodule ContextEXTest do
     def routine() do
       receive do
         {:func, caller} ->
-          send caller, func()
+          send caller, func(3)
+          routine()
+        {:func, caller, x} ->
+          send caller, func(x)
           routine()
         {:end, caller} -> send caller, :end
       end
     end
 
-    deflf func(), %{:categoryA => :layer1, :categoryB => :layer2}, do: 2
-    deflf func(), %{:categoryB => :layer3}, do: 3
-    deflf func(), @context1, do: 1 # enable @
-    deflf func(), do: 0
+    deflfp func(_), %{:categoryA => :layer1, :categoryB => :layer2}, do: 2
+    deflfp func(_), %{:categoryB => :layer3}, do: 3
+    deflfp func(_), @context1, do: 1 # enable @
+    deflfp func(x), %{:categoryC => 1} when x == 1, do: 1
+    deflfp func(x), %{:categoryC => 1} when x != 1, do: 2
+    deflfp func(x), %{} when x == 1, do: 3
+    deflfp func(_), do: 0
   end
 
 
@@ -159,5 +166,19 @@ defmodule ContextEXTest do
       val = Agent.get(agent, &(&1))
       assert val == []
     end)
+  end
+
+  test "Guard test" do
+    p = TestMod.start
+    cast_activate_layer(p, %{:categoryC => 1})
+    send p, {:func, self(), 1}
+    assert_receive 1
+
+    send p, {:func, self(), 2}
+    assert_receive 2
+
+    cast_activate_layer(p, %{:categoryC => 2})
+    send p, {:func, self(), 1}
+    assert_receive 3
   end
 end
