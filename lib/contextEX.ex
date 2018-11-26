@@ -61,6 +61,7 @@ defmodule ContextEX do
         # ↓じゃダメなのか
         group = unquote(group)
       do
+        IO.inspect :i1
         node_agent_pid =
           case Process.whereis(node_agent_name) do
             # unregistered
@@ -74,6 +75,7 @@ defmodule ContextEX do
             pid -> pid
           end
 
+        IO.inspect :i2
         local_node_agent_pid =
           case Process.whereis(local_node_agent_name) do
             #unregistered
@@ -87,6 +89,7 @@ defmodule ContextEX do
             pid -> pid
           end
 
+        IO.inspect :i3
         # register self_pid in node_agent
         Agent.update(node_agent_pid, fn(state) ->
           [{group, self_pid, %{}} | state]
@@ -97,12 +100,14 @@ defmodule ContextEX do
           [{group, self_pid, %{}} | state]
         end)
 
+        IO.inspect :i4
         # register nodeLevel agent's pid in globalLevel agent
         Agent.update(top_agent_pid, fn(state) ->
           flag = Enum.any?(state, fn(x) -> x == node_agent_pid end)
           if flag, do: state, else: [node_agent_pid | state]
         end)
 
+        IO.inspect :i5
         # unregister when process is down
         spawn(fn ->
           Process.monitor(self_pid)
@@ -148,6 +153,7 @@ defmodule ContextEX do
   """
   defmacro get_activelayers(pid) do
     quote do
+        IO.inspect :ga1
       self_pid = unquote(pid)
       node_agent_pid = Process.whereis String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node()))
       res1 = Agent.get(node_agent_pid, fn(state) ->
@@ -156,6 +162,7 @@ defmodule ContextEX do
           p == self_pid
         end)
       end)
+        IO.inspect :ga2
       local_node_agent_pid = Process.whereis String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node()))
       res2 = Agent.get(local_node_agent_pid, fn(state) ->
         state |> Enum.find(fn(x) ->
@@ -163,15 +170,18 @@ defmodule ContextEX do
           p == self_pid
         end)
       end)
+        IO.inspect :ga3
       layers1 = case res1 do
           nil -> nil
           {_, _, layers} -> layers
       end
+        IO.inspect :ga4
       layers2 = case res2 do
           nil -> nil
           {_, _, layers} -> layers
       end
 
+        IO.inspect :ga5
       if(layers1 != nil && layers2 != nil) do
         Map.merge(layers1,layers2)
       else
