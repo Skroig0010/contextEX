@@ -98,6 +98,7 @@ defmodule ContextEX do
         end)
 
         # register nodeLevel agent's pid in globalLevel agent
+        IO.inspect top_agent_pid
         Agent.update(top_agent_pid, fn(state) ->
           flag = Enum.any?(state, fn(x) -> x == node_agent_pid end)
             if flag, do: state, else: [node_agent_pid | state]
