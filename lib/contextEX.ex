@@ -98,15 +98,12 @@ defmodule ContextEX do
           [{group, self_pid, %{}} | state]
         end)
 
-        IO.inspect :i1
-
         # register nodeLevel agent's pid in globalLevel agent
         Agent.update(top_agent_pid, fn(state) ->
           flag = Enum.any?(state, fn(x) -> x == node_agent_pid end)
             if flag, do: state, else: [node_agent_pid | state]
         end)
 
-        IO.inspect :i2
         # unregister when process is down
         spawn(fn ->
           Process.monitor(self_pid)
