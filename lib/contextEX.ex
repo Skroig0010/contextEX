@@ -1,6 +1,7 @@
 defmodule ContextEX do
   @top_agent_name :ContextEXAgent
   @node_agent_prefix "_node_agent_"
+  @local_node_agent_prefix "_local_node_agent_"
 
   @partial_prefix "_partial_"
   @arg_name "arg"
@@ -15,6 +16,8 @@ defmodule ContextEX do
 
       defp get_activelayers(), do: get_activelayers(self())
       defp cast_activate_layer(map), do: cast_activate_layer(self(), map)
+      defp get_active_local_layers(), do: get_active_local_layers(self())
+      defp cast_activate_local_layer(map), do: cast_activate_local_layer(self(), map)
       defp call_activate_layer(map), do: call_activate_layer(self(), map)
       defp is_active?(layer), do: is_active?(self(), layer)
     end
@@ -53,6 +56,7 @@ defmodule ContextEX do
       with  self_pid = self(),
         top_agent_pid = :global.whereis_name(unquote(@top_agent_name)),
         node_agent_name = String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node())),
+        local_node_agent_name = String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node())),
         # group = (if (unquote(group) == nil), do: nil, else: unquote(group))
         # ↓じゃダメなのか
         group = unquote(group)
@@ -70,8 +74,26 @@ defmodule ContextEX do
             pid -> pid
           end
 
+        local_node_agent_pid =
+          case Process.whereis(local_node_agent_name) do
+            #unregistered
+            nil ->
+              case Agent.start(fn -> [] end, [name: local_node_agent_name]) do
+                {:ok, pid} -> pid
+                {:error, {:already_started, pid}} -> pid
+                _ -> raise "Error at init_context!"
+              end
+              # already registered
+            pid -> pid
+          end
+
         # register self_pid in node_agent
         Agent.update(node_agent_pid, fn(state) ->
+          [{group, self_pid, %{}} | state]
+        end)
+
+        # register self_pid in local_node_agent
+        Agent.update(local_node_agent_pid, fn(state) ->
           [{group, self_pid, %{}} | state]
         end)
 
@@ -87,6 +109,12 @@ defmodule ContextEX do
           receive do
             msg ->
               Agent.update(node_agent_pid, fn(state) ->
+                Enum.filter(state, fn(x) ->
+                  {_, pid, _} = x
+                  pid != self_pid
+                end)
+              end)
+              Agent.update(local_node_agent_pid, fn(state) ->
                 Enum.filter(state, fn(x) ->
                   {_, pid, _} = x
                   pid != self_pid
@@ -122,7 +150,37 @@ defmodule ContextEX do
     quote do
       self_pid = unquote(pid)
       node_agent_pid = Process.whereis String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node()))
-      res = Agent.get(node_agent_pid, fn(state) ->
+      res1 = Agent.get(node_agent_pid, fn(state) ->
+        state |> Enum.find(fn(x) ->
+          {_group, p, _layers} = x
+          p == self_pid
+        end)
+      end)
+      local_node_agent_pid = Process.whereis String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node()))
+      res2 = Agent.get(local_node_agent_pid, fn(state) ->
+        state |> Enum.find(fn(x) ->
+          {_group, p, _layers} = x
+          p == self_pid
+        end)
+      end)
+      Map.merge(
+        case res1 do
+          nil -> nil
+          {_, _, layers} -> layers
+        end,
+        case res2 do
+          nil -> nil
+          {_, _, layers} -> layers
+        end)
+
+    end
+  end
+
+  defmacro get_active_local_layers(pid) do
+    quote do
+      self_pid = unquote(pid)
+      local_node_agent_pid = Process.whereis String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node()))
+      res = Agent.get(local_node_agent_pid, fn(state) ->
         state |> Enum.find(fn(x) ->
           {_group, p, _layers} = x
           p == self_pid
@@ -147,6 +205,28 @@ defmodule ContextEX do
         node_agent_pid = Process.whereis(String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node()))),
       do:
         Agent.cast(node_agent_pid, fn(state) ->
+          Enum.map(state, fn(x) ->
+            case x do
+              {group, ^self_pid, layers} ->
+                {group, self_pid, Map.merge(layers, unquote(map))}
+              x -> x
+            end
+          end)
+        end)
+    end
+  end
+
+  @doc """
+  update active layers
+  return :ok
+  return nil when pid isn't registered
+  """
+  defmacro cast_activate_local_layer(pid, map) do
+    quote do
+      with  self_pid = unquote(pid),
+        local_node_agent_pid = Process.whereis(String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node()))),
+      do:
+        Agent.cast(local_node_agent_pid, fn(state) ->
           Enum.map(state, fn(x) ->
             case x do
               {group, ^self_pid, layers} ->
@@ -215,10 +295,10 @@ defmodule ContextEX do
 
   defmacro with_context(map, do: body_exp) do
     quote do
-      prev_context = get_activelayers()
-      cast_activate_layer(unquote(map))
+      prev_context = get_active_local_layers()
+      cast_activate_local_layer(unquote(map))
       unquote(body_exp)
-      cast_activate_layer(prev_context)
+      cast_activate_local_layer(prev_context)
     end
   end
 
