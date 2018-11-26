@@ -18,6 +18,7 @@ defmodule ContextEX do
       defp cast_activate_layer(map), do: cast_activate_layer(self(), map)
       defp get_active_local_layers(), do: get_active_local_layers(self())
       defp cast_activate_local_layer(map), do: cast_activate_local_layer(self(), map)
+      defp call_activate_local_layer(map), do: cast_activate_local_layer(self(), map)
       defp call_activate_layer(map), do: call_activate_layer(self(), map)
       defp is_active?(layer), do: is_active?(self(), layer)
     end
@@ -254,6 +255,17 @@ defmodule ContextEX do
     quote bind_quoted: [pid: pid, map: map] do
       cast_activate_layer(pid, map)
       get_activelayers(pid)
+    end
+  end
+
+  @doc """
+  update active local layers
+  return latest active local layers
+  """
+  defmacro call_activate_local_layer(pid, map) do
+    quote bind_quoted: [pid: pid, map: map] do
+      cast_activate_local_layer(pid, map)
+      get_active_local_layers(pid)
     end
   end
 
