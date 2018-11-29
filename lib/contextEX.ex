@@ -326,6 +326,11 @@ defmodule ContextEX do
     end
   end
 
+  defmacro deflf({:when, meta, [func, cond_exp]}, do: body_exp) do
+    when_clause = {:when, meta, [{:%{}, [], []}, cond_exp]}
+    quote do: deflf(unquote(func), unquote(when_clause), do: unquote(body_exp))
+  end
+
 
   defmacro deflf(func, do: body_exp) do
     quote do: deflf(unquote(func), %{}, do: unquote(body_exp))
@@ -365,13 +370,14 @@ defmodule ContextEX do
     end
   end
 
+  defmacro deflfp({:when, meta, [func, cond_exp]}, do: body_exp) do
+    when_clause = {:when, meta, [{:%{}, [], []}, cond_exp]}
+    quote do: deflfp(unquote(func), unquote(when_clause), do: unquote(body_exp))
+  end
+
   defmacro deflfp(func, do: body_exp) do
     quote do: deflfp(unquote(func), %{}, do: unquote(body_exp))
   end
-
-  #defmacro deflfp({:when, meta, [func, cond_exp]}, do: body_exp) do
-  #  quote do: deflfp(unquote(func), unquote({:when, meta, [%{}, cond_exp]}), do: unquote(body_exp))
-  #end
 
   defmacro deflfp({name, meta, args_exp}, {:when, meta2, [map_exp, cond_exp]}, do: body_exp) do
     new_definition =

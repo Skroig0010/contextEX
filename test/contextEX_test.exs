@@ -36,7 +36,7 @@ defmodule ContextEXTest do
     deflfp func(_), @context1, do: 1 # enable @
     deflfp func(x), %{:categoryC => 1} when x == 1, do: 1
     deflfp func(x), %{:categoryC => 1} when x != 1, do: 2
-    deflfp func(x), %{} when x == 1, do: 3
+    deflfp func(x) when x == 1, do: 3
     deflfp func(_), do: 0
   end
 
