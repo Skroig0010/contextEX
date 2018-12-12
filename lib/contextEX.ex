@@ -1,11 +1,10 @@
 defmodule ContextEX do
   @top_agent_name :ContextEXAgent
   @node_agent_prefix "_node_agent_"
+  @local_node_agent_prefix "_local_node_agent_"
 
   @partial_prefix "_partial_"
   @arg_name "arg"
-
-  @local_context_agent_name :local_context_agent
 
 
   defmacro __using__(_options) do
@@ -13,9 +12,13 @@ defmodule ContextEX do
       import unquote(__MODULE__)
       @before_compile unquote(__MODULE__)
       Module.register_attribute __MODULE__, :layered_function, accumulate: true, persist: false
+      Module.register_attribute __MODULE__, :layered_private_function, accumulate: true, persist: false
 
       defp get_activelayers(), do: get_activelayers(self())
       defp cast_activate_layer(map), do: cast_activate_layer(self(), map)
+      defp get_active_local_layers(), do: get_active_local_layers(self())
+      defp cast_activate_local_layer(map), do: cast_activate_local_layer(self(), map)
+      defp call_activate_local_layer(map), do: cast_activate_local_layer(self(), map)
       defp call_activate_layer(map), do: call_activate_layer(self(), map)
       defp is_active?(layer), do: is_active?(self(), layer)
     end
@@ -23,10 +26,13 @@ defmodule ContextEX do
 
   defmacro __before_compile__(env) do
     attrs = Module.get_attribute(env.module, :layered_function)
-    defList = attrs |> Enum.map(&(gen_genericfunction_ast(&1, env.module)))
+    defList1 = attrs |> Enum.map(&(gen_genericfunction_ast(&1, env.module)))
+
+    attrs = Module.get_attribute(env.module, :layered_private_function)
+    defList2 = attrs |> Enum.map(&(gen_private_genericfunction_ast(&1, env.module)))
 
     # return AST
-    {:__block__, [], defList}
+    {:__block__, [], defList1 ++ defList2}
   end
 
   @doc """
@@ -34,7 +40,6 @@ defmodule ContextEX do
   This server contains list which is pid of nodeLevel contexteServers.
   """
   def start() do
-    IO.inspect :hello
     unless (is_pid :global.whereis_name(@top_agent_name)) do
       try do
         Agent.start(fn -> [] end, [name: {:global, @top_agent_name}])
@@ -52,6 +57,7 @@ defmodule ContextEX do
       with  self_pid = self(),
         top_agent_pid = :global.whereis_name(unquote(@top_agent_name)),
         node_agent_name = String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node())),
+        local_node_agent_name = String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node())),
         group = (if (unquote(group) == nil), do: nil, else: unquote(group))
         # ↓じゃtestのunregisterで怒られる
         # group = unquote(group)
@@ -78,24 +84,33 @@ defmodule ContextEX do
             pid -> pid
           end
 
-        # start local contextServer
-        unless (is_pid Process.whereis(unquote(@local_context_agent_name))) do
-          try do
-            Agent.start(fn -> %{} end, [name: unquote(@local_context_agent_name)])
-          rescue
-            e -> e
+        local_node_agent_pid =
+          case Process.whereis(local_node_agent_name) do
+            #unregistered
+            nil ->
+              case Agent.start(fn -> [] end, [name: local_node_agent_name]) do
+                {:ok, pid} -> pid
+                {:error, {:already_started, pid}} -> pid
+                _ -> raise "Error at init_context!"
+              end
+              # already registered
+            pid -> pid
           end
-        end
 
         # register self_pid in node_agent
         Agent.update(node_agent_pid, fn(state) ->
           [{group, self_pid, %{}} | state]
         end)
 
+        # register self_pid in local_node_agent
+        Agent.update(local_node_agent_pid, fn(state) ->
+          [{group, self_pid, %{}} | state]
+        end)
+
         # register nodeLevel agent's pid in globalLevel agent
         Agent.update(top_agent_pid, fn(state) ->
           flag = Enum.any?(state, fn(x) -> x == node_agent_pid end)
-          if flag, do: state, else: [node_agent_pid | state]
+            if flag, do: state, else: [node_agent_pid | state]
         end)
 
         # unregister when process is down
@@ -104,6 +119,12 @@ defmodule ContextEX do
           receive do
             msg ->
               Agent.update(node_agent_pid, fn(state) ->
+                Enum.filter(state, fn(x) ->
+                  {_, pid, _} = x
+                  pid != self_pid
+                end)
+              end)
+              Agent.update(local_node_agent_pid, fn(state) ->
                 Enum.filter(state, fn(x) ->
                   {_, pid, _} = x
                   pid != self_pid
@@ -145,14 +166,44 @@ defmodule ContextEX do
           p == self_pid
         end)
       end)
-      local_context_agent_pid = Process.whereis unquote(@local_context_agent_name)
-      res2 = Agent.get(local_context_agent_pid, fn(state) -> state end)
-      case res1 do
+      local_node_agent_pid = Process.whereis String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node()))
+      res2 = Agent.get(local_node_agent_pid, fn(state) ->
+        state |> Enum.find(fn(x) ->
+          {_group, p, _layers} = x
+          p == self_pid
+        end)
+      end)
+      layers1 = case res1 do
+          nil -> nil
+          {_, _, layers} -> layers
+      end
+      layers2 = case res2 do
+          nil -> nil
+          {_, _, layers} -> layers
+      end
+
+      if(layers1 != nil && layers2 != nil) do
+        Map.merge(layers1,layers2)
+      else
+        nil
+      end
+
+    end
+  end
+
+  defmacro get_active_local_layers(pid) do
+    quote do
+      self_pid = unquote(pid)
+      local_node_agent_pid = Process.whereis String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node()))
+      res = Agent.get(local_node_agent_pid, fn(state) ->
+        state |> Enum.find(fn(x) ->
+          {_group, p, _layers} = x
+          p == self_pid
+        end)
+      end)
+      case res do
         nil -> nil
-        {_, _, layers} ->
-          Map.merge(
-            layers,
-            res2)
+        {_, _, layers} -> layers
       end
     end
   end
@@ -180,6 +231,28 @@ defmodule ContextEX do
   end
 
   @doc """
+  update active local layers
+  return :ok
+  return nil when pid isn't registered
+  """
+  defmacro cast_activate_local_layer(pid, map) do
+    quote do
+      with  self_pid = unquote(pid),
+        local_node_agent_pid = Process.whereis(String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node()))),
+      do:
+        Agent.cast(local_node_agent_pid, fn(state) ->
+          Enum.map(state, fn(x) ->
+            case x do
+              {group, ^self_pid, layers} ->
+                {group, self_pid, Map.merge(layers, unquote(map))}
+              x -> x
+            end
+          end)
+        end)
+    end
+  end
+
+  @doc """
   update active layers
   return latest active layers
   """
@@ -187,6 +260,17 @@ defmodule ContextEX do
     quote bind_quoted: [pid: pid, map: map] do
       cast_activate_layer(pid, map)
       get_activelayers(pid)
+    end
+  end
+
+  @doc """
+  update active local layers
+  return latest active local layers
+  """
+  defmacro call_activate_local_layer(pid, map) do
+    quote bind_quoted: [pid: pid, map: map] do
+      cast_activate_local_layer(pid, map)
+      get_active_local_layers(pid)
     end
   end
 
@@ -240,13 +324,12 @@ defmodule ContextEX do
     end
   end
 
-  defmacro with_context(context, do: body_exp) do
+  defmacro with_context(map, do: body_exp) do
     quote do
-      pid = Process.whereis unquote(@local_context_agent_name)
-      local_context = Agent.get(pid, fn(context) -> context end)
-      Agent.update(pid, fn(local_context) -> Map.merge(unquote(context), local_context) end)
+      prev_context = get_active_local_layers()
+      cast_activate_local_layer(unquote(map))
       unquote(body_exp)
-      Agent.update(pid, fn(state) -> local_context end)
+      cast_activate_local_layer(prev_context)
     end
   end
 
@@ -257,11 +340,34 @@ defmodule ContextEX do
     end
   end
 
+  defmacro deflf({:when, meta, [func, cond_exp]}, do: body_exp) do
+    when_clause = {:when, meta, [{:%{}, [], []}, cond_exp]}
+    quote do: deflf(unquote(func), unquote(when_clause), do: unquote(body_exp))
+  end
+
+
   defmacro deflf(func, do: body_exp) do
     quote do: deflf(unquote(func), %{}, do: unquote(body_exp))
   end
 
-  defmacro deflf({name, meta, args_exp}, map_exp \\ %{}, do: body_exp) do
+  defmacro deflf({name, meta, args_exp}, {:when, meta2, [map_exp, cond_exp]}, do: body_exp) do
+    new_definition =
+      with  pf_name = partialfunc_name(name),
+            new_args = List.insert_at(args_exp, 0, map_exp),
+      do: {:when, meta2, [{pf_name, meta, new_args}, cond_exp]}
+
+    quote bind_quoted: [name: name, arity: length(args_exp), body: Macro.escape(body_exp), definition: Macro.escape(new_definition)] do
+      # register layered function
+      unless @layered_function[name] == arity, do: @layered_function {name, arity}
+
+      # define partialFunc in Caller module
+      Kernel.defp(unquote(definition)) do
+        unquote(body)
+      end
+    end
+  end
+
+  defmacro deflf({name, meta, args_exp}, map_exp, do: body_exp) do
     new_definition =
       with  pf_name = partialfunc_name(name),
             new_args = List.insert_at(args_exp, 0, map_exp),
@@ -278,12 +384,66 @@ defmodule ContextEX do
     end
   end
 
+  defmacro deflfp({:when, meta, [func, cond_exp]}, do: body_exp) do
+    when_clause = {:when, meta, [{:%{}, [], []}, cond_exp]}
+    quote do: deflfp(unquote(func), unquote(when_clause), do: unquote(body_exp))
+  end
+
+  defmacro deflfp(func, do: body_exp) do
+    quote do: deflfp(unquote(func), %{}, do: unquote(body_exp))
+  end
+
+  defmacro deflfp({name, meta, args_exp}, {:when, meta2, [map_exp, cond_exp]}, do: body_exp) do
+    new_definition =
+      with  pf_name = partialfunc_name(name),
+            new_args = List.insert_at(args_exp, 0, map_exp),
+      do: {:when, meta2, [{pf_name, meta, new_args}, cond_exp]}
+
+    quote bind_quoted: [name: name, arity: length(args_exp), body: Macro.escape(body_exp), definition: Macro.escape(new_definition)] do
+      # register layered function
+      unless @layered_private_function[name] == arity, do: @layered_private_function {name, arity}
+
+      # define partialFunc in Caller module
+      Kernel.defp(unquote(definition)) do
+        unquote(body)
+      end
+    end
+  end
+
+  defmacro deflfp({name, meta, args_exp}, map_exp, do: body_exp) do
+    new_definition =
+      with pf_name = partialfunc_name(name),
+           new_args = List.insert_at(args_exp, 0, map_exp),
+        do: {pf_name, meta, new_args}
+
+    quote bind_quoted: [name: name, arity: length(args_exp), body: Macro.escape(body_exp), definition: Macro.escape(new_definition)] do
+      unless @layered_private_function[name] == arity, do: @layered_private_function {name, arity}
+
+      Kernel.defp(unquote(definition)) do
+        unquote(body)
+      end
+    end
+  end
+
 
   defp partialfunc_name(func_name), do: String.to_atom(@partial_prefix <> Atom.to_string(func_name))
 
   defp gen_genericfunction_ast({func_name, arity}, module) do
     args = gen_dummy_args(arity, module)
     {:def, [context: module, import: Kernel],
+      [{func_name, [context: module], args},
+       [do:
+         {:__block__, [],[
+          {:=, [], [{:layer, [], module}, {:get_activelayers, [], []}]},
+          {partialfunc_name(func_name), [context: module],
+            # pass activated layers for first arg
+            List.insert_at(args, 0, {:layer, [], module})}
+         ]}]]}
+  end
+
+  defp gen_private_genericfunction_ast({func_name, arity}, module) do
+    args = gen_dummy_args(arity, module)
+    {:defp, [context: module, import: Kernel],
       [{func_name, [context: module], args},
        [do:
          {:__block__, [],[
