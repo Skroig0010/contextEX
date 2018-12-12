@@ -52,10 +52,19 @@ defmodule ContextEX do
       with  self_pid = self(),
         top_agent_pid = :global.whereis_name(unquote(@top_agent_name)),
         node_agent_name = String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node())),
-        # group = (if (unquote(group) == nil), do: nil, else: unquote(group))
-        # ↓じゃダメなのか
-        group = unquote(group)
+        group = (if (unquote(group) == nil), do: nil, else: unquote(group))
+        # ↓じゃtestのunregisterで怒られる
+        # group = unquote(group)
       do
+        group = if (is_list(group)) do
+          group
+        else
+          if(is_atom(group)) do
+            [group]
+          else
+            raise ArgumentError, message: "group must be atom or atom list."
+          end
+        end
         node_agent_pid =
           case Process.whereis(node_agent_name) do
             # unregistered
@@ -138,13 +147,13 @@ defmodule ContextEX do
       end)
       local_context_agent_pid = Process.whereis unquote(@local_context_agent_name)
       res2 = Agent.get(local_context_agent_pid, fn(state) -> state end)
-      Map.merge(
-        case res1 do
-          nil -> nil
-          {_, _, layers} -> layers
-        end,
-        res2)
-
+      case res1 do
+        nil -> nil
+        {_, _, layers} ->
+          Map.merge(
+            layers,
+            res2)
+      end
     end
   end
 
@@ -183,14 +192,17 @@ defmodule ContextEX do
 
   defmacro cast_activate_group(target_group, map) do
     quote bind_quoted: [top_agent_name: @top_agent_name, target_group: target_group, map: map] do
+      unless(is_atom(target_group)) do
+        raise ArgumentError, message: "target_group must be atom."
+      end
       top_agent = :global.whereis_name top_agent_name
       Agent.get(top_agent, fn(state) -> state end) |> Enum.each(fn(pid) ->
         Agent.cast(pid, fn(state) ->
-          Enum.map(state, fn(row) ->
-            case row do
-              {^target_group, pid, layers} ->
-                {target_group, pid, Map.merge(layers, map)}
-              row -> row
+          Enum.map(state, fn({group, pid, layers}) ->
+            if(Enum.member?(group, target_group)) do
+              {group, pid, Map.merge(layers, map)}
+            else
+              {group, pid, layers}
             end
           end)
         end)
@@ -200,18 +212,21 @@ defmodule ContextEX do
 
   defmacro call_activate_group(target_group, map) do
     quote bind_quoted: [top_agent_name: @top_agent_name, target_group: target_group, map: map] do
+      unless(is_atom(target_group)) do
+        raise ArgumentError, message: "target_group must be atom."
+      end
       top_agent = :global.whereis_name top_agent_name
       self_pid = self()
       node_agents = Agent.get(top_agent, fn(state) -> state end)
       Enum.each(node_agents, fn(pid) ->
         spawn(fn ->
           Agent.update(pid, fn(state) ->
-            Enum.map(state, fn(row) ->
-              case row do
-                {^target_group, pid, layers} ->
-                  {target_group, pid, Map.merge(layers, map)}
-                  row -> row
-              end
+            Enum.map(state, fn({group, pid, layers}) ->
+            if(Enum.member?(group, target_group)) do
+              {group, pid, Map.merge(layers, map)}
+            else
+              {group, pid, layers}
+            end
             end)
           end)
           send self_pid, :ok

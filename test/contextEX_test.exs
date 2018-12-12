@@ -10,6 +10,7 @@ defmodule ContextEXTest do
     @context1 %{:categoryA => :layer1}
 
     def start(groupName \\ nil) do
+      ContextEX.start()
       pid = spawn(fn ->
         init_context(groupName)
         routine()
