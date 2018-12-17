@@ -51,12 +51,25 @@ defmodule ContextEX do
   end
 
   @doc """
+  get top agent pid until sink node register top agent with global
+  """
+  def get_top_agent_pid() do
+    pid = :global.whereis_name(unquote(@top_agent_name))
+    if(pid == :undefined) do
+      :timer.sleep(100)
+      get_top_agent_pid()
+    else
+      pid
+    end
+  end
+
+  @doc """
   Register process(self()) in nodeLevel contextServer.
   """
   defmacro init_context(group \\ nil) do
     quote do
       with  self_pid = self(),
-        top_agent_pid = :global.whereis_name(unquote(@top_agent_name)),
+        top_agent_pid = get_top_agent_pid(),
         node_agent_name = String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node())),
         local_node_agent_name = String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node())),
         sink_node_group_name = unquote(@sink_node_group_name),
