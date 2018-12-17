@@ -22,22 +22,23 @@ defmodule ContextEXTest do
     def routine() do
       receive do
         {:func, caller} ->
-          send caller, func(3)
+          send caller, func()
           routine()
         {:func, caller, x} ->
-          send caller, func(x)
+          send caller, func2(x)
           routine()
         {:end, caller} -> send caller, :end
       end
     end
 
-    deflfp func(_), %{:categoryA => :layer1, :categoryB => :layer2}, do: 2
-    deflfp func(_), %{:categoryB => :layer3}, do: 3
-    deflfp func(_), @context1, do: 1 # enable @
-    deflfp func(x), %{:categoryC => 1} when x == 1, do: 1
-    deflfp func(x), %{:categoryC => 1} when x != 1, do: 2
-    deflfp func(x) when x == 1, do: 3
-    deflfp func(_), do: 0
+    deflfp func(), %{:categoryA => :layer1, :categoryB => :layer2}, do: 2
+    deflfp func(), %{:categoryB => :layer3}, do: 3
+    deflfp func(), @context1, do: 1 # enable @
+    deflfp func(), do: 0
+    deflfp func2(x), %{:categoryC => 1} when x == 1, do: 1
+    deflfp func2(x), %{:categoryC => 1} when x != 1, do: 2
+    deflfp func2(x) when x == 1, do: 3
+    deflfp func2(_), do: 0
   end
 
 
@@ -156,7 +157,7 @@ defmodule ContextEXTest do
   test "Remove registered process" do
     TestMod.start()
     top_agent_pid = :global.whereis_name(@top_agent_name)
-    node_agents = Agent.get(top_agent_pid, &(&1))
+    {_sink, node_agents} = Agent.get(top_agent_pid, &(&1))
     Enum.each(node_agents, fn(agent) ->
       val = Agent.get(agent, &(&1))
       assert val != []

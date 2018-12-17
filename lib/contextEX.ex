@@ -2,6 +2,7 @@ defmodule ContextEX do
   @top_agent_name :ContextEXAgent
   @node_agent_prefix "_node_agent_"
   @local_node_agent_prefix "_local_node_agent_"
+  @sink_node_group_name :sink
 
   @partial_prefix "_partial_"
   @arg_name "arg"
@@ -42,7 +43,7 @@ defmodule ContextEX do
   def start() do
     unless (is_pid :global.whereis_name(@top_agent_name)) do
       try do
-        Agent.start(fn -> [] end, [name: {:global, @top_agent_name}])
+        Agent.start(fn -> {nil, []} end, [name: {:global, @top_agent_name}])
       rescue
         e -> e
       end
@@ -58,6 +59,7 @@ defmodule ContextEX do
         top_agent_pid = :global.whereis_name(unquote(@top_agent_name)),
         node_agent_name = String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node())),
         local_node_agent_name = String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node())),
+        sink_node_group_name = unquote(@sink_node_group_name),
         group = (if (unquote(group) == nil), do: nil, else: unquote(group))
         # ↓じゃtestのunregisterで怒られる
         # group = unquote(group)
@@ -108,9 +110,17 @@ defmodule ContextEX do
         end)
 
         # register nodeLevel agent's pid in globalLevel agent
-        Agent.update(top_agent_pid, fn(state) ->
+        Agent.update(top_agent_pid, fn({sink, state}) ->
           flag = Enum.any?(state, fn(x) -> x == node_agent_pid end)
-            if flag, do: state, else: [node_agent_pid | state]
+            if flag do
+              {sink, state}
+            else
+              if(Enum.member?(group, sink_node_group_name)) do
+                {node_agent_pid, [node_agent_pid | state]}
+              else
+                {sink, [node_agent_pid | state]}
+              end
+            end
         end)
 
         # unregister when process is down
@@ -138,15 +148,20 @@ defmodule ContextEX do
 
   def remove_registered_process() do
     top_agent_pid = :global.whereis_name(@top_agent_name)
-    node_agents = Agent.get(top_agent_pid, &(&1))
+    {sink, node_agents} = Agent.get(top_agent_pid, &(&1))
+    nodes = if sink != nil do
+      [sink | node_agents]
+    else
+      node_agents
+    end
     self_pid = self()
-    Enum.each(node_agents, fn(agent) ->
+    Enum.each(nodes, fn(agent) ->
       spawn(fn ->
         Agent.update(agent, fn(_) -> [] end)
         send self_pid, :ok
       end)
     end)
-    Enum.each(node_agents, fn(_) ->
+    Enum.each(nodes, fn(_) ->
       receive do
         :ok -> :ok
       end
@@ -280,7 +295,7 @@ defmodule ContextEX do
         raise ArgumentError, message: "target_group must be atom."
       end
       top_agent = :global.whereis_name top_agent_name
-      Agent.get(top_agent, fn(state) -> state end) |> Enum.each(fn(pid) ->
+      Agent.get(top_agent, fn({sink, state}) -> state end) |> Enum.each(fn(pid) ->
         Agent.cast(pid, fn(state) ->
           Enum.map(state, fn({group, pid, layers}) ->
             if(Enum.member?(group, target_group)) do
@@ -301,7 +316,7 @@ defmodule ContextEX do
       end
       top_agent = :global.whereis_name top_agent_name
       self_pid = self()
-      node_agents = Agent.get(top_agent, fn(state) -> state end)
+      node_agents = Agent.get(top_agent, fn({sink, state}) -> state end)
       Enum.each(node_agents, fn(pid) ->
         spawn(fn ->
           Agent.update(pid, fn(state) ->
