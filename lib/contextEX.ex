@@ -312,7 +312,7 @@ defmodule ContextEX do
         raise ArgumentError, message: "target_group must be atom."
       end
       top_agent = :global.whereis_name top_agent_name
-      Agent.get(top_agent, fn({sink, state}) -> state end) |> Enum.each(fn(pid) ->
+      Agent.get(top_agent, fn({sink, state}) -> if(target_group == :sink) do [sink] else state end end) |> Enum.each(fn(pid) ->
         Agent.cast(pid, fn(state) ->
           Enum.map(state, fn({group, pid, layers}) ->
             if(Enum.member?(group, target_group)) do
@@ -333,7 +333,7 @@ defmodule ContextEX do
       end
       top_agent = :global.whereis_name top_agent_name
       self_pid = self()
-      node_agents = Agent.get(top_agent, fn({sink, state}) -> state end)
+      node_agents = Agent.get(top_agent, fn({sink, state}) -> if(target_group == :sink) do [sink] else state end end)
       Enum.each(node_agents, fn(pid) ->
         spawn(fn ->
           Agent.update(pid, fn(state) ->
