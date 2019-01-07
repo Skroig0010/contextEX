@@ -99,7 +99,6 @@ defmodule ContextEX do
             pid -> pid
           end
 
-          IO.inspect :init0
         local_node_agent_pid =
           case Process.whereis(local_node_agent_name) do
             #unregistered
@@ -113,7 +112,6 @@ defmodule ContextEX do
             pid -> pid
           end
 
-          IO.inspect :init1
         # register self_pid in node_agent
         Agent.update(node_agent_pid, fn(state) ->
           [{group, self_pid, %{}} | state]
@@ -124,7 +122,6 @@ defmodule ContextEX do
           [{group, self_pid, %{}} | state]
         end)
 
-          IO.inspect :init2
         # register nodeLevel agent's pid in globalLevel agent
         Agent.update(top_agent_pid, fn({sink, state}) ->
           flag = Enum.any?(state, fn(x) -> x == node_agent_pid end)
@@ -139,7 +136,6 @@ defmodule ContextEX do
             end
         end)
 
-          IO.inspect :init3
         # unregister when process is down
         spawn(fn ->
           Process.monitor(self_pid)
@@ -312,7 +308,14 @@ defmodule ContextEX do
         raise ArgumentError, message: "target_group must be atom."
       end
       top_agent = :global.whereis_name top_agent_name
-      Agent.get(top_agent, fn({sink, state}) -> if(target_group == :sink) do [sink] else state end end) |> Enum.each(fn(pid) ->
+      Agent.get(top_agent, fn({sink, state}) ->
+        if(target_group == :sink) do
+          [sink]
+        else
+          state
+        end
+      end) 
+      |> Enum.each(fn(pid) ->
         Agent.cast(pid, fn(state) ->
           Enum.map(state, fn({group, pid, layers}) ->
             if(Enum.member?(group, target_group)) do
