@@ -77,7 +77,7 @@ defmodule ContextEX do
         # ↓じゃtestのunregisterで怒られる
         # group = unquote(group)
       do
-        group = if (is_list(group)) do
+        group = if (is_list(group) && Enum.all?(group, fn x -> is_atom(x) end)) do
           group
         else
           if(is_atom(group)) do
