@@ -126,6 +126,7 @@ defmodule ContextEX do
         Agent.update(top_agent_pid, fn({sink, state}) ->
           flag = Enum.any?(state, fn(x) -> x == node_agent_pid end)
             if flag do
+              # don't update
               {sink, state}
             else
               if(Enum.member?(group, sink_node_group_name)) do
