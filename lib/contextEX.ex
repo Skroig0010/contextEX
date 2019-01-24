@@ -371,7 +371,7 @@ defmodule ContextEX do
   defmacro is_active?(pid, layer) do
     quote do
       map = get_activelayers(unquote(pid))
-      unquote(layer) in Map.values(map)
+      unquote(layer) in Map.keys(map)
     end
   end
 
