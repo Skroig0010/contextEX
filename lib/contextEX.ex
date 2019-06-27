@@ -66,7 +66,7 @@ defmodule ContextEX do
   @doc """
   Register process(self()) in nodeLevel contextServer.
   """
-  defmacro init_context(group \\ nil) do
+  defmacro init_context(group \\ nil, grouping_functions  \\ []) do
     quote do
       with  self_pid = self(),
         top_agent_pid = get_top_agent_pid(),
@@ -74,9 +74,12 @@ defmodule ContextEX do
         local_node_agent_name = String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node())),
         sink_node_group_name = unquote(@sink_node_group_name),
         group = (if (unquote(group) == nil), do: nil, else: unquote(group))
+        grouping_function = (if(unquote(grouping_functions) == []) do: [] else: unquote(grouping_functions))
         # ↓じゃtestのunregisterで怒られる
         # group = unquote(group)
       do
+
+        # groupのエラーチェック
         group = if (is_list(group) && Enum.all?(group, fn x -> is_atom(x) end)) do
           group
         else
@@ -86,6 +89,15 @@ defmodule ContextEX do
             raise ArgumentError, message: "group must be atom or atom list."
           end
         end
+
+        # grouping_functionsのエラーチェック
+        grouping_functions = if (is_list(grouping_functions) && Enum.all?(grouping_functions, fn x -> is_function(x) end)) do
+          grouping_functions
+        else
+          raise ArgumentError, message: "grouping_functions must be context -> boolean or function list."
+        end
+
+
         node_agent_pid =
           case Process.whereis(node_agent_name) do
             # unregistered
