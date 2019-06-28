@@ -73,8 +73,8 @@ defmodule ContextEX do
         node_agent_name = String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node())),
         local_node_agent_name = String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node())),
         sink_node_group_name = unquote(@sink_node_group_name),
-        group = (if (unquote(group) == nil), do: nil, else: unquote(group))
-        grouping_function = (if(unquote(grouping_functions) == []) do: [] else: unquote(grouping_functions))
+        group = (if (unquote(group) == nil), do: nil, else: unquote(group)),
+        grouping_functions = (if (unquote(grouping_functions) == []), do: [], else: unquote(grouping_functions))
         # ↓じゃtestのunregisterで怒られる
         # group = unquote(group)
       do
@@ -94,9 +94,20 @@ defmodule ContextEX do
         grouping_functions = if (is_list(grouping_functions) && Enum.all?(grouping_functions, fn x -> is_function(x) end)) do
           grouping_functions
         else
-          raise ArgumentError, message: "grouping_functions must be context -> boolean or function list."
+          if(is_function(grouping_functions)) do
+            [grouping_functions]
+          else
+            raise ArgumentError, message: "grouping_functions must be map -> atom -> atom or function list."
+          end
         end
-
+        # groupの要素数と個数をあわせる
+        len_group = length(group)
+        len_grp_fun = length(grouping_functions)
+        grouping_functions = cond do
+          len_group == len_grp_fun -> grouping_functions
+          len_group > len_grp_fun -> grouping_functions ++ List.duplicate(fn x, y -> y end, len_group - len_grp_fun)
+          len_group < len_grp_fun -> raise ArgumentError, message: "grouping_functions' length must be lower than group's length"
+        end
 
         node_agent_pid =
           case Process.whereis(node_agent_name) do
@@ -126,12 +137,12 @@ defmodule ContextEX do
 
         # register self_pid in node_agent
         Agent.update(node_agent_pid, fn(state) ->
-          [{group, self_pid, %{}} | state]
+          [{group, grouping_functions, self_pid, %{}} | state]
         end)
 
         # register self_pid in local_node_agent
         Agent.update(local_node_agent_pid, fn(state) ->
-          [{group, self_pid, %{}} | state]
+          [{group, grouping_functions, self_pid, %{}} | state]
         end)
 
         # register nodeLevel agent's pid in globalLevel agent
@@ -156,19 +167,31 @@ defmodule ContextEX do
             msg ->
               Agent.update(node_agent_pid, fn(state) ->
                 Enum.filter(state, fn(x) ->
-                  {_, pid, _} = x
+                  {_, _, pid, _} = x
                   pid != self_pid
                 end)
               end)
               Agent.update(local_node_agent_pid, fn(state) ->
                 Enum.filter(state, fn(x) ->
-                  {_, pid, _} = x
+                  {_, _, pid, _} = x
                   pid != self_pid
                 end)
               end)
           end
         end)
       end
+    end
+  end
+
+  defmacro change_group(group, grouping_functions, contexts) do
+    quote do
+      group = unquote(group)
+      grouping_functions = unquote(grouping_functions)
+      contexts = unquote(contexts)
+      Enum.zip(group, grouping_functions)
+      |> Enum.map(fn {x, fun} ->
+        fun.(contexts, x)
+      end)
     end
   end
 
@@ -203,24 +226,24 @@ defmodule ContextEX do
       node_agent_pid = Process.whereis String.to_atom(unquote(@node_agent_prefix) <> Atom.to_string(node()))
       res1 = Agent.get(node_agent_pid, fn(state) ->
         state |> Enum.find(fn(x) ->
-          {_group, p, _layers} = x
+          {_group, _func, p, _layers} = x
           p == self_pid
         end)
       end)
       local_node_agent_pid = Process.whereis String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node()))
       res2 = Agent.get(local_node_agent_pid, fn(state) ->
         state |> Enum.find(fn(x) ->
-          {_group, p, _layers} = x
+          {_group, _func, p, _layers} = x
           p == self_pid
         end)
       end)
       layers1 = case res1 do
           nil -> nil
-          {_, _, layers} -> layers
+          {_, _, _, layers} -> layers
       end
       layers2 = case res2 do
           nil -> nil
-          {_, _, layers} -> layers
+          {_, _, _, layers} -> layers
       end
 
       if(layers1 != nil && layers2 != nil) do
@@ -238,13 +261,13 @@ defmodule ContextEX do
       local_node_agent_pid = Process.whereis String.to_atom(unquote(@local_node_agent_prefix) <> Atom.to_string(node()))
       res = Agent.get(local_node_agent_pid, fn(state) ->
         state |> Enum.find(fn(x) ->
-          {_group, p, _layers} = x
+          {_group, _func, p, _layers} = x
           p == self_pid
         end)
       end)
       case res do
         nil -> nil
-        {_, _, layers} -> layers
+        {_, _, _, layers} -> layers
       end
     end
   end
@@ -262,8 +285,8 @@ defmodule ContextEX do
         Agent.cast(node_agent_pid, fn(state) ->
           Enum.map(state, fn(x) ->
             case x do
-              {group, ^self_pid, layers} ->
-                {group, self_pid, Map.merge(layers, unquote(map))}
+              {group, func, ^self_pid, layers} ->
+                {group, func, self_pid, Map.merge(layers, unquote(map))}
               x -> x
             end
           end)
@@ -284,8 +307,8 @@ defmodule ContextEX do
         Agent.cast(local_node_agent_pid, fn(state) ->
           Enum.map(state, fn(x) ->
             case x do
-              {group, ^self_pid, layers} ->
-                {group, self_pid, Map.merge(layers, unquote(map))}
+              {group, func, ^self_pid, layers} ->
+                {group, func, self_pid, Map.merge(layers, unquote(map))}
               x -> x
             end
           end)
@@ -321,20 +344,15 @@ defmodule ContextEX do
         raise ArgumentError, message: "target_group must be atom."
       end
       top_agent = :global.whereis_name top_agent_name
-      Agent.get(top_agent, fn({sink, state}) ->
-        if(target_group == :sink) do
-          [sink]
-        else
-          state
-        end
-      end) 
+      Agent.get(top_agent, fn({sink, state}) -> if(target_group == :sink) do [sink] else state end end) 
       |> Enum.each(fn(pid) ->
         Agent.cast(pid, fn(state) ->
-          Enum.map(state, fn({group, pid, layers}) ->
-            if(Enum.member?(group, target_group)) do
-              {group, pid, Map.merge(layers, map)}
+          Enum.map(state, fn({group, grouping_functions, pid, layers}) ->
+            new_group = change_group(group, grouping_functions, layers)
+            if(Enum.member?(new_group, target_group)) do
+              {new_group, grouping_functions, pid, Map.merge(layers, map)}
             else
-              {group, pid, layers}
+              {new_group, grouping_functions, pid, layers}
             end
           end)
         end)
@@ -353,11 +371,12 @@ defmodule ContextEX do
       Enum.each(node_agents, fn(pid) ->
         spawn(fn ->
           Agent.update(pid, fn(state) ->
-            Enum.map(state, fn({group, pid, layers}) ->
-            if(Enum.member?(group, target_group)) do
-              {group, pid, Map.merge(layers, map)}
+            Enum.map(state, fn({group, grouping_functions, pid, layers}) ->
+            new_group = change_group(group, grouping_functions, layers)
+            if(Enum.member?(new_group, target_group)) do
+              {new_group, grouping_functions, pid, Map.merge(layers, map)}
             else
-              {group, pid, layers}
+              {new_group, grouping_functions, pid, layers}
             end
             end)
           end)

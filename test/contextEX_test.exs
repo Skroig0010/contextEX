@@ -9,10 +9,10 @@ defmodule ContextEXTest do
     use ContextEX
     @context1 %{:categoryA => :layer1}
 
-    def start(groupName \\ nil) do
+    def start(groupName \\ nil, grouping_functions \\ []) do
       ContextEX.start()
       pid = spawn(fn ->
-        init_context(groupName)
+        init_context(groupName, grouping_functions)
         routine()
       end)
       Process.sleep 100
@@ -181,5 +181,34 @@ defmodule ContextEXTest do
     cast_activate_layer(p, %{:categoryC => 2})
     send p, {:func, self(), 1}
     assert_receive 3
+  end
+
+  test "Grouping function test" do
+    fun = fn context, old_group ->
+      cond do
+        context[:categoryC] == :layer3 -> :groupD
+        context[:categoryA] == :layer1 -> :groupB
+        true -> old_group
+      end
+    end
+
+    p1 = TestMod.start([:groupA, :all], fun)
+    p2 = TestMod.start([:groupA, :all], fun)
+    p3 = TestMod.start([:groupB, :all], fun)
+    p4 = TestMod.start([:groupC, :all], fun)
+
+    cast_activate_group(:groupA, %{:categoryA => :layer1})
+    cast_activate_group(:groupB, %{:categoryB => :layer2})
+    assert get_activelayers(p1) == %{:categoryA => :layer1, :categoryB => :layer2}
+    assert get_activelayers(p2) == %{:categoryA => :layer1, :categoryB => :layer2}
+    assert get_activelayers(p3) == %{:categoryB => :layer2}
+    assert get_activelayers(p4) == %{}
+
+    cast_activate_group(:all, %{:categoryC => :layer3})
+    cast_activate_group(:groupD, %{:categoryB => :layer4})
+    assert get_activelayers(p1) == %{:categoryA => :layer1, :categoryC => :layer3, :categoryB => :layer4}
+    assert get_activelayers(p2) == %{:categoryA => :layer1, :categoryC => :layer3, :categoryB => :layer4}
+    assert get_activelayers(p3) == %{:categoryC => :layer3, :categoryB => :layer4}
+    assert get_activelayers(p4) == %{:categoryC => :layer3, :categoryB => :layer4}
   end
 end
